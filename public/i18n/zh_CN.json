@@ -7,6 +7,10 @@
         "title": "文档链接图标",
         "description": "在文档引用 [](siyuan://) 前插入图标"
     },
+    "SingleCharLinkIcon": {
+        "title": "单字符链接图标",
+        "description": "链接文本只有一个字符时是否显示链接图标（含文档链接图标）。关闭后单字符链接不再显示图标"
+    },
     "upload": "上传自定义图标",
     "manage": "管理自定义图标"
 }

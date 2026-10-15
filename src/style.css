@@ -1339,3 +1339,13 @@ html[data-theme-mode="light"] .b3-typography a[href *="github.io"]::before {
     content: "";
     background-image: url('plugins/link-icon/icon/ww2mathworks.ico');
 }
+
+/* ===== 单字符链接图标开关：关闭时隐藏被标记链接的 ::before 图标 ===== */
+body.link-icon--hide-single-char .protyle-wysiwyg [data-node-id] span[data-type~='a'].link-icon-single-char::before,
+body.link-icon--hide-single-char .protyle-wysiwyg [data-node-id] span[data-type~='url'].link-icon-single-char::before,
+body.link-icon--hide-single-char .protyle-wysiwyg [data-node-id] a.link-icon-single-char::before,
+body.link-icon--hide-single-char .b3-typography a.link-icon-single-char::before {
+    content: none !important;
+    display: none !important;
+    background-image: none !important;
+}

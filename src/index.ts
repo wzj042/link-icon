@@ -88,6 +88,47 @@ async function queryDocIcon(block_id) {
     return result;
 }
 
+const SINGLE_CHAR_CLASS = "link-icon-single-char";
+const HIDE_SINGLE_CHAR_BODY_CLASS = "link-icon--hide-single-char";
+const LINK_SELECTOR = "span[data-type~='a'], span[data-type~='url'], a[href]";
+
+const segmenter = typeof Intl !== "undefined" && (Intl as any).Segmenter
+    ? new (Intl as any).Segmenter(undefined, { granularity: "grapheme" })
+    : null;
+
+/**
+ * 链接文本（去掉首尾空白）是否只有一个字符（按字素计，emoji 算一个）
+ */
+function isSingleCharText(text: string | null | undefined) {
+    const t = (text ?? "").replace(/[​﻿]/g, "").trim();
+    if (t.length === 0) return false;
+    if (segmenter) {
+        let n = 0;
+        for (const _ of segmenter.segment(t)) {
+            if (++n > 1) return false;
+        }
+        return n === 1;
+    }
+    return Array.from(t).length === 1;
+}
+
+/**
+ * 给单字符链接打标记（class 不会被思源写回数据，重渲染后由观察器重新标记）
+ */
+function markSingleCharLink(el: Element) {
+    const single = isSingleCharText(el.textContent);
+    if (single !== el.classList.contains(SINGLE_CHAR_CLASS)) {
+        el.classList.toggle(SINGLE_CHAR_CLASS, single);
+    }
+}
+
+function markSingleCharLinksIn(root: ParentNode) {
+    if (root instanceof Element && root.matches(LINK_SELECTOR)) {
+        markSingleCharLink(root);
+    }
+    root.querySelectorAll?.(LINK_SELECTOR).forEach(markSingleCharLink);
+}
+
 function isUnicodeEmoji(text) {
     const regex = /\p{Emoji}/u;
     return regex.test(text);
@@ -120,8 +161,13 @@ export default class LinkIconPlugin extends siyuan.Plugin {
 
     config = {
         InsertDocRefIcon: true,
-        InsertDocLinkIcon: false
+        InsertDocLinkIcon: false,
+        SingleCharLinkIcon: true
     }
+
+    private singleCharObserver: MutationObserver | null = null;
+    private pendingRoots = new Set<Node>();
+    private flushScheduled = false;
 
     customIcons: { href: string, iconUrl: string }[] = []
 
@@ -144,11 +190,71 @@ export default class LinkIconPlugin extends siyuan.Plugin {
         });
         dynamicStyle.flushStyle();
         this.eventBus.on(EVENT_LOADED_PROTYLE, this.Listener);
+        this.applySingleCharSetting();
     }
 
     async onunload() {
         this.eventBus.off(EVENT_LOADED_PROTYLE, this.Listener);
         dynamicStyle.clearStyle();
+        this.stopSingleCharObserver();
+        document.body.classList.remove(HIDE_SINGLE_CHAR_BODY_CLASS);
+    }
+
+    /**
+     * 根据配置开启/关闭单字符链接图标隐藏：
+     * 关闭图标时给 body 加 class，并用观察器持续标记单字符链接
+     */
+    applySingleCharSetting() {
+        const hide = !this.config.SingleCharLinkIcon;
+        document.body.classList.toggle(HIDE_SINGLE_CHAR_BODY_CLASS, hide);
+        if (hide) {
+            markSingleCharLinksIn(document.body);
+            this.startSingleCharObserver();
+        } else {
+            this.stopSingleCharObserver();
+        }
+    }
+
+    private startSingleCharObserver() {
+        if (this.singleCharObserver) return;
+        this.singleCharObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.type === "characterData") {
+                    const link = m.target.parentElement?.closest(LINK_SELECTOR);
+                    if (link) this.pendingRoots.add(link);
+                    continue;
+                }
+                const target = m.target as Element;
+                const link = target.closest?.(LINK_SELECTOR);
+                if (link) this.pendingRoots.add(link);
+                m.addedNodes.forEach(n => {
+                    if (n.nodeType === Node.ELEMENT_NODE) this.pendingRoots.add(n);
+                });
+            }
+            this.scheduleFlush();
+        });
+        this.singleCharObserver.observe(document.body, {
+            childList: true, subtree: true, characterData: true
+        });
+    }
+
+    private stopSingleCharObserver() {
+        this.singleCharObserver?.disconnect();
+        this.singleCharObserver = null;
+        this.pendingRoots.clear();
+    }
+
+    private scheduleFlush() {
+        if (this.flushScheduled) return;
+        this.flushScheduled = true;
+        requestAnimationFrame(() => {
+            this.flushScheduled = false;
+            const roots = [...this.pendingRoots];
+            this.pendingRoots.clear();
+            roots.forEach(r => {
+                if (r.isConnected) markSingleCharLinksIn(r as ParentNode);
+            });
+        });
     }
 
     initUI() {
@@ -158,6 +264,9 @@ export default class LinkIconPlugin extends siyuan.Plugin {
         const inputDocLink = document.createElement('input');
         inputDocLink.type = 'checkbox';
         inputDocLink.className = "b3-switch fn__flex-center";
+        const inputSingleChar = document.createElement('input');
+        inputSingleChar.type = 'checkbox';
+        inputSingleChar.className = "b3-switch fn__flex-center";
         const uploadBtn = document.createElement('button');
         uploadBtn.className = "b3-button fn__size200";
         uploadBtn.textContent = this.i18n.upload;
@@ -206,7 +315,9 @@ export default class LinkIconPlugin extends siyuan.Plugin {
             confirmCallback: () => {
                 this.config.InsertDocRefIcon = inputDocRef.checked;
                 this.config.InsertDocLinkIcon = inputDocLink.checked;
+                this.config.SingleCharLinkIcon = inputSingleChar.checked;
                 this.saveData(ConfigFile, this.config);
+                this.applySingleCharSetting();
             }
         });
         this.setting.addItem({
@@ -223,6 +334,14 @@ export default class LinkIconPlugin extends siyuan.Plugin {
             createActionElement: () => {
                 inputDocLink.checked = this.config.InsertDocLinkIcon;
                 return inputDocLink;
+            },
+        });
+        this.setting.addItem({
+            title: this.i18n.SingleCharLinkIcon.title,
+            description: this.i18n.SingleCharLinkIcon.description,
+            createActionElement: () => {
+                inputSingleChar.checked = this.config.SingleCharLinkIcon;
+                return inputSingleChar;
             },
         });
         this.setting.addItem({
@@ -274,6 +393,9 @@ export default class LinkIconPlugin extends siyuan.Plugin {
                 const pattern = new RegExp("siyuan:\\/\\/blocks\\/(.*)");
                 const result = data_href.match(pattern);
                 if (result) {
+                    if (!this.config.SingleCharLinkIcon && isSingleCharText(element.textContent)) {
+                        return;
+                    }
                     const block_id = result[1];
                     this.insertDocIconBefore(element, block_id);
                 }

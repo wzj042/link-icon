@@ -7,6 +7,10 @@
         "title": "Insert doc link icon",
         "description": "Insert icon before a document link [](siyuan://)"
     },
+    "SingleCharLinkIcon": {
+        "title": "Icon for single-char links",
+        "description": "Show link icon when the link text is a single character (including doc link icons). Turn off to hide icons on single-char links"
+    },
     "upload": "Upload Custom Icon",
     "manage": "Manage Custom Icons"
 }
